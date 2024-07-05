@@ -1,4 +1,4 @@
-import { atom, selector, selectorFamily } from "recoil";
+import { atom, selectorFamily } from "recoil";
 
 export const state = atom<readonly { header: string; items: string[] }[]>({
     key: "state",
@@ -9,15 +9,18 @@ export const state = atom<readonly { header: string; items: string[] }[]>({
     ],
 });
 
-export const headersSelector = selector<string[]>({
-    key: "headersSelector",
-    get: ({ get }) => get(state).map(({ header }) => header),
-});
-
 export const itemsSelector = selectorFamily<string[], string>({
     key: "headersSelector",
     get:
         (header: string) =>
         ({ get }) =>
             get(state).find((column) => column.header === header)?.items ?? [],
+});
+
+export const parentHeaderSelector = selectorFamily<string | undefined, string>({
+    key: "parentSelector",
+    get:
+        (id: string) =>
+        ({ get }) =>
+            get(state).find((column) => column.items.includes(id))?.header,
 });

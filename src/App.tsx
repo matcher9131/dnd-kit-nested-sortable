@@ -1,31 +1,76 @@
-import { DndContext, DragEndEvent } from "@dnd-kit/core";
+import { DndContext, DragEndEvent, DragOverEvent, DragOverlay, DragStartEvent } from "@dnd-kit/core";
 import Container from "./components/container/Container";
 import { SortableContext, rectSwappingStrategy } from "@dnd-kit/sortable";
-import { headersSelector, state } from "./models/items";
+import { itemsSelector, state } from "./models/items";
 import SortableColumn from "./components/column/SortableColumn";
 import { useRecoilState, useRecoilValue } from "recoil";
 import { toSwapped } from "./util/util";
+import { createPortal } from "react-dom";
+import Item from "./components/item/Item";
+import Column from "./components/column/Column";
+import { activeIdState, overIdState } from "./models/dragTarget";
+
+const ColumnDragOverlay = ({ header }: { header: string }): JSX.Element => {
+    const items = useRecoilValue(itemsSelector(header));
+    return (
+        <Column header={header}>
+            {items.map((item) => (
+                <Item key={item} label={item} />
+            ))}
+        </Column>
+    );
+};
 
 const App = (): JSX.Element => {
     const [columns, setColumns] = useRecoilState(state);
-    const headers = useRecoilValue(headersSelector);
+    const [activeId, setActiveId] = useRecoilState(activeIdState);
+    const [, setOverId] = useRecoilState(overIdState);
+
+    const handleDragStart = (e: DragStartEvent): void => {
+        setActiveId(e.active.id.toString());
+    };
+
+    const handleDragOver = (e: DragOverEvent): void => {
+        setOverId(e.over?.id?.toString() ?? null);
+    };
+
+    const handleDragCancel = (): void => {
+        setActiveId(null);
+        setOverId(null);
+    };
 
     const handleDragEnd = (e: DragEndEvent): void => {
-        const activeId = e.active?.id?.toString();
-        const overId = e.over?.id?.toString();
-        if (activeId == null || overId == null) return;
+        const currentActiveId = e.active.id.toString();
+        const currentOverId = e.over?.id?.toString();
+        if (currentOverId == null) {
+            setActiveId(null);
+            setOverId(null);
+            return;
+        }
+
+        // 試しにA1とB1のみ入れ替えを禁じてみる
+        if (
+            (currentActiveId === "A1" && currentOverId === "B1") ||
+            (currentActiveId === "B1" && currentOverId === "A1")
+        ) {
+            setActiveId(null);
+            setOverId(null);
+            return;
+        }
 
         // Columnどうしの入れ替え
-        const activeHeaderIndex = headers.indexOf(activeId);
-        const overHeaderIndex = headers.indexOf(overId);
+        const activeHeaderIndex = columns.findIndex(({ header }) => header === currentActiveId);
+        const overHeaderIndex = columns.findIndex(({ header }) => header === currentOverId);
         if (activeHeaderIndex >= 0 && overHeaderIndex >= 0) {
             setColumns((prev) => toSwapped(prev, activeHeaderIndex, overHeaderIndex));
+            setActiveId(null);
+            setOverId(null);
             return;
         }
 
         // Itemどうしの入れ替え
-        const activeParentColumn = columns.find((column) => column.items.includes(activeId));
-        const overParentColumn = columns.find((column) => column.items.includes(overId));
+        const activeParentColumn = columns.find((column) => column.items.includes(currentActiveId));
+        const overParentColumn = columns.find((column) => column.items.includes(currentOverId));
         if (activeParentColumn != null && overParentColumn != null) {
             if (activeParentColumn == overParentColumn) {
                 // 同じColumn内でのItemの入れ替え
@@ -36,8 +81,8 @@ const App = (): JSX.Element => {
                                   ...column,
                                   items: toSwapped(
                                       column.items,
-                                      column.items.indexOf(activeId),
-                                      column.items.indexOf(overId),
+                                      column.items.indexOf(currentActiveId),
+                                      column.items.indexOf(currentOverId),
                                   ),
                               }
                             : column,
@@ -48,25 +93,51 @@ const App = (): JSX.Element => {
                 setColumns((prev) =>
                     prev.map((column) =>
                         column == activeParentColumn
-                            ? { ...column, items: column.items.map((item) => (item === activeId ? overId : item)) }
+                            ? {
+                                  ...column,
+                                  items: column.items.map((item) => (item === currentActiveId ? currentOverId : item)),
+                              }
                             : column == overParentColumn
-                              ? { ...column, items: column.items.map((item) => (item === overId ? activeId : item)) }
+                              ? {
+                                    ...column,
+                                    items: column.items.map((item) =>
+                                        item === currentOverId ? currentActiveId : item,
+                                    ),
+                                }
                               : column,
                     ),
                 );
             }
         }
+        setActiveId(null);
+        setOverId(null);
     };
 
     return (
         <div className="w-full p-5">
-            <DndContext onDragEnd={handleDragEnd}>
+            <DndContext
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragCancel={handleDragCancel}
+                onDragEnd={handleDragEnd}
+            >
                 <Container>
-                    <SortableContext items={headers} strategy={rectSwappingStrategy}>
-                        {headers.map((header) => (
+                    <SortableContext items={columns.map(({ header }) => header)} strategy={rectSwappingStrategy}>
+                        {columns.map(({ header }) => (
                             <SortableColumn key={header} header={header} />
                         ))}
                     </SortableContext>
+                    {createPortal(
+                        <DragOverlay dropAnimation={{ duration: 0 }}>
+                            {activeId &&
+                                (columns.some(({ header }) => header === activeId) ? (
+                                    <ColumnDragOverlay header={activeId} />
+                                ) : (
+                                    <Item label={activeId} />
+                                ))}
+                        </DragOverlay>,
+                        document.body,
+                    )}
                 </Container>
             </DndContext>
         </div>
